@@ -1,0 +1,11 @@
+{
+  "checkpoint": "sp_medium",
+  "perplexity": 1.8737378557219286,
+  "avg_nll": 0.627935289144516,
+  "n_eval_samples": 50,
+  "xml_validity_rate": 0.98,
+  "svg_render_rate": 0.98,
+  "structural_validity_rate": 0.98,
+  "viewbox_rate": 1.0,
+  "avg_generated_length": 319.74
+}

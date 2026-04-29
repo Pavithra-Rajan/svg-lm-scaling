@@ -1,0 +1,12 @@
+{
+  "source_parameterization": "SP",
+  "xl_params": 91638528.0,
+  "target_params": 916385280.0,
+  "predicted_loss": 2.5064744140466453,
+  "uncertainty_1sigma": 0.0,
+  "fit_params": {
+    "a": 0.0303575834251925,
+    "alpha": -0.21387852864135945,
+    "c": 0.0
+  }
+}
