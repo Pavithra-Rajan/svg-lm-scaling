@@ -1,0 +1,62 @@
+\documentclass[a4paper]{article} 
+\input{head}
+\begin{document}
+
+
+\fancyhead[C]{}
+\hrule \medskip % Upper rule
+\begin{minipage}{0.295\textwidth} 
+\raggedright
+\footnotesize
+Submitted by: Pavithra Rajan \hfill\\   
+NetID: pr2725\hfill\\
+\end{minipage}
+\begin{minipage}{0.4\textwidth} 
+\centering 
+\large 
+CS-GY 6923: Project\\ 
+\normalsize 
+Machine Learning\\ 
+\end{minipage}
+\begin{minipage}{0.295\textwidth} 
+\raggedleft
+
+\end{minipage}
+\medskip\hrule 
+\bigskip
+
+\section{Introduction}
+
+Scaling laws for neural language models have emerged as one of the most practically useful empirical findings in modern deep learning. Kaplan et al.\cite{1} demonstrated that model loss follows a predictable power-law as a function of model size, dataset size, and compute budget, enabling practitioners to extrapolate the performance of large, expensive models from small, cheap runs. Subsequent work by Hoffmann et al.\cite{2} refined these findings into compute-optimal training recipes. However, nearly all such studies target natural language and far less is known about whether these relationships hold for structured, programmatic representations of visual content.
+\vspace{5pt}
+
+Scalable Vector Graphics (SVG) occupies an interesting middle ground between code and visual art. An SVG file is a sequence of XML-tagged drawing commands like paths, shapes, gradients, and transforms, that a renderer interprets to produce an image. This structure makes SVGs to be treated as a programming language. Yet the semantics are fundamentally visual. Recent work such as StarVector~\cite{3} has demonstrated that language models can be trained to generate and understand SVG, opening the door to automated icon synthesis, vector graphic editing, and scalable design tools. However, it remains unclear how model capacity translates to generation quality in this domain. Does loss improve at the same rate as in natural language? Do the same power-law exponents hold? Can learning rates be transferred across scales without re-sweeping?
+\vspace{5pt}
+
+This project investigates scaling laws for decoder-only Transformer language models trained exclusively on SVG data. I make two primary contributions. First, I train five GPT-style models spanning roughly two orders of magnitude in parameter count, from 853,120 (Tiny) to 85,347,072 (XL), on a curated corpus of vector icon SVGs and fit power-law curves of the form $L = a \cdot N^{-\alpha} + c$ to characterize how validation loss scales with model size. Second, I evaluate Maximal Update Parameterization ($\mu$P)\cite{4} as a mechanism for learning-rate transfer. By reparameterizing the model in $\mu$P coordinates, the optimal learning rate at small scale should remain optimal at large scale, potentially eliminating the need for expensive per-scale hyperparameter sweeps.
+\vspace{1pt}
+
+The pipeline covers the full machine learning life cycle comprising of data collection and cleaning, BPE tokenizer training, binary dataset preparation, model definition, learning-rate sweeps, scaling runs, quantitative analysis, and a qualitative evaluation of generated SVG samples. Through this end-to-end study, the aim is to characterize whether the favorable scaling properties observed in natural language carry over to the SVG domain, and whether $\mu$P provides a reliable shortcut for hyperparameter transfer in this setting.
+
+\section{Data}
+\section{Methods}
+\section{Results}
+\section{Discussion}
+\section{Conclusion}
+\section{Appendices}
+
+\begin{thebibliography}{00}
+
+\bibitem[1]{1} J. Kaplan, S. McCandlish, T. Henighan, T. B. Brown, B. Chess, R. Child, S. Gray, A. Radford, J. Wu, and D. Amodei, ``Scaling Laws for Neural Language Models,'' \textit{arXiv preprint arXiv:2001.08361}, 2020.
+
+\bibitem[2]{hoffmann2022chinchilla} J. Hoffmann, S. Borgeaud, A. Mensch, E. Buchatskaya, T. Cai, E. Rutherford, D. de Las Casas, L. A. Hendricks, J. Welbl, A. Clark, et al., ``Training Compute-Optimal Large Language Models,'' \textit{arXiv preprint arXiv:2203.15556}, 2022.
+
+\bibitem[3]{yang2022mup} G. Yang, E. J. Hu, I. Babuschkin, S. Sidor, X. Liu, D. Farhi, N. Ryder, J. Pachocki, W. Chen, and J. Gao, ``Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer,'' \textit{arXiv preprint arXiv:2203.03466}, 2022.
+
+\bibitem[4]{starvector2023} J. A. Rodriguez, S. Agarwal, I. H. Ben Mhenni, E. Belilovsky, E. Oyallon, and S. E. Kahou, ``StarVector: Generating Scalable Vector Graphics Code from Images,'' \textit{arXiv preprint arXiv:2312.11556}, 2023.
+
+\bibitem[5]{karpathy2022nanogpt} A. Karpathy, ``nanoGPT,'' \url{https://github.com/karpathy/nanoGPT}, 2022.
+
+\end{thebibliography}
+
+\end{document}
