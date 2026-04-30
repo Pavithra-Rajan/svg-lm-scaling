@@ -50,6 +50,14 @@ The preprocessing pipeline is intentionally aggressive, since SVGs in the real-w
 
 Cleaned SVGs are written to a single \texttt{all\_svgs.jsonl} artifact, which serves as input to both tokenizer training and the binary packing stage. The corpus is then tokenized end-to-end, every sequence whose token length falls outside $[4,\,513]$ is discarded, and the remaining sequences are deterministically shuffled with seed 42 and split 98/1/1 into train, validation, and test partitions \emph{at the SVG level} so that no document straddles a split boundary. Each partition is concatenated into a flat \texttt{uint16} NumPy array (\texttt{train.npy}, \texttt{val.npy}, \texttt{test.npy}) following the nanoGPT~\cite{5} layout, and the dataloader samples random contiguous windows of length \texttt{block\_size}=512 from these arrays. As every document is wrapped with \texttt{<bos>}~\dots~\texttt{<eos>}, the model receives a clear in-band signal of document boundaries even when a sampled window straddles two SVGs.
 
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\linewidth]{seq_length_hist.png}
+\caption{Token-length distribution of the cleaned SVG corpus. Sequences exceeding the 512-token context window ($>$512) are filtered out; the remaining $\sim$432K SVGs concentrate in the 256--512 range.}
+\label{fig:seq_hist}
+\end{figure}
+
+
 \subsection{Tokenization Scheme}
 
 Tokenization uses Byte-Pair Encoding (BPE) with a 4{,}096-token vocabulary, a byte-level pre-tokenizer (so any UTF-8 character can be represented and \texttt{<unk>} is essentially never emitted), and a \texttt{TemplateProcessing} post-processor that wraps every encoded sequence with the special tokens \texttt{<bos>}~\dots~\texttt{<eos>}. The vocabulary also reserves \texttt{<pad>} and \texttt{<unk>}. Their integer IDs are persisted in \texttt{token\_config.json} for use by the dataloader and generator. A 4{,}096-entry vocabulary sits between the 1{,}024-token character-level extreme and the 8{,}192-token wordpiece end of the spectrum. It is large enough to capture the most common path-command motifs, but small enough that the embedding matrix remains a small fraction of total parameters at every model scale.
@@ -94,13 +102,6 @@ Test       & 4{,}337   & 1{,}474{,}488   & 1.0\%  \\
 \label{tab:data_splits}
 \end{table}
 
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.85\linewidth]{seq_length_hist.png}
-\caption{Token-length distribution of the cleaned SVG corpus. Sequences exceeding the 512-token context window ($>$512) are filtered out; the remaining $\sim$432K SVGs concentrate in the 256--512 range.}
-\label{fig:seq_hist}
-\end{figure}
-
 Figure~\ref{fig:svg_examples} shows a small grid of rendered training examples.
 
 \begin{figure}[h]
@@ -111,6 +112,198 @@ Figure~\ref{fig:svg_examples} shows a small grid of rendered training examples.
 \end{figure}
 
 \section{Methods}
+
+\subsection{Model Architectures}
+
+All models are decoder-only Transformers built on the nanoGPT~\cite{5} backbone with pre-LayerNorm, causal self-attention with learned absolute positional embeddings, residual connections, and a 4$\times$-expansion GELU MLP. Vocabulary size is fixed at $4{,}096$ and context length at \texttt{block\_size}=512 across all scales. Figure~\ref{fig:arch} shows the layer stack alongside the architectural defaults shared by every run; Table~\ref{tab:model_configs} lists the five sizes that vary along the width--depth axis.
+
+\begin{figure}[h]
+    \centering
+    \begin{minipage}[t]{0.42\linewidth}
+        \vspace{0pt}
+        \centering
+        \includegraphics[width=\linewidth]{model_architecture.png}
+    \end{minipage}\hfill
+    \begin{minipage}[t]{0.55\linewidth}
+        \vspace{0pt}
+        \small
+        \setlength{\tabcolsep}{4pt}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}ll@{}}
+        \toprule
+        Component & Choice \\
+        \midrule
+        Backbone              & nanoGPT-style decoder, pre-LN \\
+        Positional encoding   & Learned absolute (\texttt{wpe}, $\leq 512$) \\
+        Attention             & Causal MHA via \texttt{F.sdpa} \\
+        MLP                   & Linear $d{\to}4d$, GELU, Linear $4d{\to}d$ \\
+        Biases                & Disabled in all Linear / LN \\
+        Weight tying          & \texttt{wte} $\leftrightarrow$ \texttt{lm\_head} \\
+        Init (general)        & $\mathcal{N}(0,\,0.02^2)$ \\
+        Init (residual proj.) & $\mathcal{N}(0,\,(0.02 / \sqrt{2L})^2)$ \\
+        Vocabulary            & $4{,}096$ BPE tokens \\
+        Special tokens    & \texttt{<bos>}, \texttt{<eos>}, \texttt{<pad>}, \texttt{<unk>} \\
+        Context length        & 512 tokens \\
+        Dropout               & 0.0 (all scales) \\
+        \bottomrule
+        \end{tabular}
+
+        \vspace{6pt}
+        \emph{The same template is reused at every scale. Only $d_{\text{model}}$, the number of layers $L$, and the number of heads vary. See Table~\ref{tab:model_configs}.}
+    \end{minipage}
+    \caption{Layer stack of the SVG GPT model (left) and architectural defaults shared across all five model sizes (right).}
+    \label{fig:arch}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrrrr}
+\toprule
+Model & $d_{\text{model}}$ & Layers & Heads & $d_h$ & Params (non-emb.) \\
+\midrule
+Tiny   & 128 & 4  & 4  & 32 & 853{,}120     \\
+Small  & 192 & 6  & 6  & 32 & 2{,}755{,}008   \\
+Medium & 384 & 6  & 6  & 64 & 10{,}818{,}432  \\
+Large  & 512 & 10 & 8  & 64 & 31{,}730{,}176  \\
+XL     & 768 & 12 & 12 & 64 & 85{,}347{,}072    \\
+\bottomrule
+\end{tabular}
+\caption{The five model configurations used in the scaling sweep. Width (\texttt{n\_embd}), depth (\texttt{n\_layer}), and head count are scaled jointly so $d_h$ stays in the 32--64 range. Parameter counts exclude the tied embedding matrix.}
+\label{tab:model_configs}
+\end{table}
+
+\subsection{Training Setup and Hyperparameters}
+
+All five models are trained for one full epoch over the $145.6$M-token training partition with the same optimizer recipe (Table~\ref{tab:train_hp}), so any differences in final validation loss can be attributed to architectural scale rather than per-size tuning. The dataloader follows the nanoGPT pattern with each micro-batch is sampled by drawing random offsets into the flat \texttt{train.npy} array and slicing two adjacent length-512 windows to form the input/target pair.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+Hyperparameter & Value \\
+\midrule
+Optimizer                  & AdamW ($\beta_1{=}0.9$, $\beta_2{=}0.95$, $\varepsilon{=}10^{-8}$) \\
+Weight decay               & 0.1 (applied to all parameters) \\
+Gradient clipping          & global $\ell_2$ norm $\leq 1.0$ \\
+Mixed precision            & bf16 autocast (fp16 + GradScaler fallback) \\
+Compile                    & \texttt{torch.compile} when available \\
+Micro-batch size           & 16 sequences \\
+Gradient accumulation      & 8 micro-batches per optimizer step \\
+Effective batch / step     & $16 \times 8 \times 512 = 65{,}536$ tokens \\
+Steps per epoch            & $\approx 2{,}221$ \\
+LR schedule                & cosine decay $\eta_{\max} \to 0.1\,\eta_{\max}$ \\
+Linear warmup              & $5\%$ (full runs), $10\%$ (LR sweep) \\
+Validation interval        & every 200 steps, 60 random batches \\
+Final val estimate         & 200 random batches (tighter variance) \\
+Checkpoint interval        & 200 steps (resume-safe, full optimizer state) \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters shared by all SP and $\mu$P runs.}
+\label{tab:train_hp}
+\end{table}
+
+\subsection{Experimental Design for Scaling Studies}
+
+The scaling study has four stages, summarized in Table~\ref{tab:exp_pipeline}. The same pipeline is run twice, once under \emph{Standard Parameterization} (SP), once under \emph{Maximal Update Parameterization} ($\mu$P)~\cite{4}. This yielded two parallel power-law fits that are then compared.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Stage & Input & Output \\
+\midrule
+1. LR sweep on Tiny       & 7 LR candidates, 400 steps each & best $\eta_{\max}^\star$ \\
+2. Scaling runs           & 5 sizes $\times$ 1 epoch at $\eta_{\max}^\star$ & $\{(N_i, L_i)\}_{i=1}^{5}$ \\
+3. Power-law fit          & $\{(N_i, L_i)\}$  & $\alpha$, $a$, $R^2$ \\
+4. Extrapolation          & better-fitting curve (SP vs $\mu$P) & $\hat{L}$ at $10{\times}$XL \\
+\bottomrule
+\end{tabular}
+\caption{Four-stage pipeline executed end-to-end for each parameterization (SP and $\mu$P).}
+\label{tab:exp_pipeline}
+\end{table}
+
+\textbf{LR sweep:} Seven candidates span two orders of magnitude (Table~\ref{tab:lr_grid}). Each is trained on Tiny for 400 steps, and the candidate with the lowest final validation loss is selected.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lcccccccc}
+\toprule
+Index $j$        & 1 & 2 & 3 & 4 & 5 & 6 & 7 \\
+$\eta_j$         & $1{\times}10^{-4}$ & $3{\times}10^{-4}$ & $6{\times}10^{-4}$ & $1{\times}10^{-3}$ & $3{\times}10^{-3}$ & $6{\times}10^{-3}$ & $1{\times}10^{-2}$ \\
+\bottomrule
+\end{tabular}
+\caption{LR sweep grid. Same seven values are used for both SP and $\mu$P sweeps.}
+\label{tab:lr_grid}
+\end{table}
+
+\textbf{Power-law fit:} I fit the Kaplan-style relation $L(N) = a \cdot N^{-\alpha} + c$ in two ways (Table~\ref{tab:fit_methods}). The log-log linear regression is the reported value for $\alpha$. The 3-parameter \texttt{curve\_fit} with $c$ pinned to $0.95\,\min_i L_i$ is a cross-check that prevents the covariance from diverging when the five $L_i$ are close.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Method & Free params & Notes \\
+\midrule
+Log-log linear regression & $a, \alpha$ (fits $L = a N^{-\alpha}$) & Primary; numerically stable. \\
+3-param \texttt{curve\_fit} & $a, \alpha$ ($c{=}0.95\min L_i$ fixed) & Cross-check on irreducible floor. \\
+\bottomrule
+\end{tabular}
+\caption{Two estimators for the scaling-law fit. The log-log $\alpha$ is reported; the 3-parameter fit serves as a sensitivity check.}
+\label{tab:fit_methods}
+\end{table}
+
+\textbf{$\mu$P comparison:} Maximal Update Parameterization is implemented via the \texttt{mup} package. The three architectural deltas relative to SP are listed in Table~\ref{tab:mup_deltas}. Base shapes are constructed from a width-64 base model and a width-128 delta model that share the target's depth, so only the width axis is reparameterized. The base/delta head count is fixed at $4$ to keep $d_h$ divisible.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Component & SP & $\mu$P \\
+\midrule
+Attention logit scale & $1/\sqrt{d_h}$ & $1/d_h$ (via $q$ pre-scaling) \\
+Output layer          & \texttt{nn.Linear} (tied to \texttt{wte}) & \texttt{MuReadout} ($1/d_{\text{model}}$ output mult.; untied) \\
+Optimizer             & \texttt{torch.optim.AdamW} & \texttt{mup.optim.MuAdamW} \\
+\bottomrule
+\end{tabular}
+\caption{The three deltas between SP and $\mu$P. All other hyperparameters and data sampling are identical.}
+\label{tab:mup_deltas}
+\end{table}
+
+\textbf{Extrapolation:} The fit with the higher $R^2$ between SP and $\mu$P is used to predict the validation loss of a hypothetical model $10\times$ larger than XL ($\sim$$850$M params). Uncertainty in the predicted loss is propagated from the standard error of $\alpha$ via $|\partial L / \partial \alpha| = a N^{-\alpha} \log N$.
+
+\subsection{Evaluation Metrics}
+
+The two parameterizations are compared along three axes (Table~\ref{tab:metrics}). The headline metric is the final validation cross-entropy loss; system metrics characterize the compute--quality trade-off; and a qualitative pass on rendered samples is used as a sanity check on the best checkpoint, but does not drive any architectural decisions.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Category & Metric & Source / how computed \\
+\midrule
+Quality   & Final val.\ loss          & 200 random 512-token windows, end of epoch \\
+Quality   & Train / val loss curves   & Logged every 100 / 200 steps \\
+Quality   & Scaling exponent $\alpha$ & Log-log regression on $\{(N_i, L_i)\}_{i=1}^5$ \\
+Quality   & Fit quality $R^2$         & Relative to mean of $L_i$ \\
+System    & Wall-clock time           & Per-epoch, includes resumes \\
+System    & Peak GPU memory           & \texttt{torch.cuda.max\_memory\_allocated} \\
+System    & Throughput (tok/s)        & Tokens processed / wall-clock seconds \\
+SP vs $\mu$P & $\Delta L_i$           & $L_{\mu\mathrm{P},i} - L_{\mathrm{SP},i}$ per size \\
+SP vs $\mu$P & LR-transfer success    & Overlap of $\arg\min_\eta L$ across SP and $\mu$P sweeps \\
+Qualitative  & Sample inspection      & nucleus / top-$k$ generation, rendered with \texttt{cairosvg} \\
+\bottomrule
+\end{tabular}
+\caption{Metrics recorded for every training run, organized by category.}
+\label{tab:metrics}
+\end{table}
+
 \section{Results}
 \section{Discussion}
 \section{Conclusion}
