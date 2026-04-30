@@ -39,6 +39,77 @@ This project investigates scaling laws for decoder-only Transformer language mod
 The pipeline covers the full machine learning life cycle comprising of data collection and cleaning, BPE tokenizer training, binary dataset preparation, model definition, learning-rate sweeps, scaling runs, quantitative analysis, and a qualitative evaluation of generated SVG samples. Through this end-to-end study, the aim is to characterize whether the favorable scaling properties observed in natural language carry over to the SVG domain, and whether $\mu$P provides a reliable shortcut for hyperparameter transfer in this setting.
 
 \section{Data}
+
+\subsection{Dataset Description and Preprocessing Pipeline}
+
+The training corpus is assembled from four publicly released collections in the StarVector \cite{4} family of SVG datasets, all distributed via Hugging Face: \texttt{svg-icons-simple} (primary), \texttt{svg-emoji-simple}, \texttt{svg-stack-simple}, and \texttt{svg-fonts-simple}. The first two are loaded in full, while the latter two are streamed and truncated once an estimated 100M-token training budget is met. The icons set provides clean, monochromatic vector glyphs, while the emoji set adds color, gradients, and small decorative motifs; \texttt{svg-stack} contributes diversity from in-the-wild assets such as logos and UI components; and \texttt{svg-fonts} contributes typographic glyph paths. This blend keeps the corpus dominated by icon-style SVGs while exposing the model to a wider stylistic distribution.
+\vspace{4pt}
+
+The preprocessing pipeline is intentionally aggressive, since SVGs in the real-world contain large amounts of vendor-specific markup, embedded comments, and high-precision coordinates that inflate the vocabulary without aiding generation. Each file is passed through an \texttt{lxml} parser that strips comments, processing instructions, and DOM subtrees rooted at \texttt{<metadata>}, \texttt{<title>}, \texttt{<desc>}, and \texttt{<defs>}. Empty namespace declarations are then collapsed via \texttt{etree.cleanup\_namespaces}, all numeric literals are rounded to one decimal place (e.g.\ \texttt{12.345678} $\rightarrow$ \texttt{12.3}), and runs of whitespace are normalized to a single space. SVGs that fail to parse, or whose cleaned form falls outside the $[50,\,8192]$-character window, are discarded. The lower bound rejects degenerate stubs (empty paths, single rects) and the upper bound matches roughly the 512-token context window used in training, after the BPE compression ratio is taken into account.
+\vspace{4pt}
+
+Cleaned SVGs are written to a single \texttt{all\_svgs.jsonl} artifact, which serves as input to both tokenizer training and the binary packing stage. The corpus is then tokenized end-to-end, every sequence whose token length falls outside $[4,\,513]$ is discarded, and the remaining sequences are deterministically shuffled with seed 42 and split 98/1/1 into train, validation, and test partitions \emph{at the SVG level} so that no document straddles a split boundary. Each partition is concatenated into a flat \texttt{uint16} NumPy array (\texttt{train.npy}, \texttt{val.npy}, \texttt{test.npy}) following the nanoGPT~\cite{5} layout, and the dataloader samples random contiguous windows of length \texttt{block\_size}=512 from these arrays. As every document is wrapped with \texttt{<bos>}~\dots~\texttt{<eos>}, the model receives a clear in-band signal of document boundaries even when a sampled window straddles two SVGs.
+
+\subsection{Tokenization Scheme}
+
+Tokenization uses Byte-Pair Encoding (BPE) with a 4{,}096-token vocabulary, a byte-level pre-tokenizer (so any UTF-8 character can be represented and \texttt{<unk>} is essentially never emitted), and a \texttt{TemplateProcessing} post-processor that wraps every encoded sequence with the special tokens \texttt{<bos>}~\dots~\texttt{<eos>}. The vocabulary also reserves \texttt{<pad>} and \texttt{<unk>}. Their integer IDs are persisted in \texttt{token\_config.json} for use by the dataloader and generator. A 4{,}096-entry vocabulary sits between the 1{,}024-token character-level extreme and the 8{,}192-token wordpiece end of the spectrum. It is large enough to capture the most common path-command motifs, but small enough that the embedding matrix remains a small fraction of total parameters at every model scale.
+\vspace{4pt}
+
+The merges learned by the trainer reveal the structure of the SVG ``language''. The very first merges fuse the leading space character (encoded as \texttt{G} in byte-level BPE) with single digits and with the path commands \texttt{L}, \texttt{C}, and \texttt{M}, reflecting how SVG path data is dominated by sequences of the form \texttt{L\,x\,y} or \texttt{C\,x\textsubscript{1}\,y\textsubscript{1}\,x\textsubscript{2}\,y\textsubscript{2}\,x\,y}. Shortly after, full attribute keywords emerge as single tokens (\texttt{Gstroke}, \texttt{Gfill}, \texttt{Gwidth}), followed by frequent integer prefixes (\texttt{G12}, \texttt{G13}, \texttt{G14}, \dots), and finally rarer multi-digit coordinates seen in the larger viewboxes of \texttt{svg-stack} (\texttt{G2343}, \texttt{1928}). As an example, the below icon
+\begin{figure}[h]
+    \centering
+    \begin{minipage}{0.65\linewidth}
+        {\small\begin{verbatim}
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 24 24">
+<path d="M12 2L2 7l10 5 10-5-10-5z"/></svg>
+        \end{verbatim}}
+    \end{minipage}%
+    \begin{minipage}{0.3\linewidth}
+        \centering
+        \includegraphics[width=0.7\linewidth]{diamond.png}
+    \end{minipage}
+    \caption{An SVG of a rhombus shape}
+    \label{fig:placeholder}
+\end{figure}
+\noindent encodes to roughly 30 tokens including \texttt{<bos>}/\texttt{<eos>}. This is the underlying reason of using a corpus-wide compression of $\sim$3 characters per token. As noted in the estimate, this is denser than OpenAI's English benchmark of $\sim$4 chars/token because SVG contains more numerals and structural punctuation that resist merging.
+
+\subsection{Statistics and Rendered Examples}
+
+After cleaning, the raw JSONL contains $774{,}688$ SVGs totalling $804.6$M characters (avg.\ $1{,}038$ chars per file). Tokenization, the $[4,\,513]$-token length filter, and the document-level split together yield the partitions in Table~\ref{tab:data_splits}; the training set comprises $145.6$M tokens, comfortably above the $\sim$100M target. Figure~\ref{fig:seq_hist} shows the token-length distribution after filtering. The corpus is bimodal between the 128--256 and 384--512 buckets, reflecting the contrast between simple monochrome icons (\texttt{svg-icons}) and denser multi-path glyphs from \texttt{svg-stack} and \texttt{svg-fonts}. Only $975$ of the $\sim$435K candidate documents exceed the 512-token cap and are dropped. Average sequence length after filtering is $342$ tokens.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+Split & SVGs & Tokens & Share \\
+\midrule
+Train      & 425{,}063 & 145{,}573{,}946 & 98.0\% \\
+Validation & 4{,}337   & 1{,}482{,}782   & 1.0\%  \\
+Test       & 4{,}337   & 1{,}474{,}488   & 1.0\%  \\
+\bottomrule
+\end{tabular}
+\caption{Final dataset partitions after BPE tokenization, length filtering, and 98/1/1 split. Token counts include \texttt{<bos>}/\texttt{<eos>} markers.}
+\label{tab:data_splits}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\linewidth]{seq_length_hist.png}
+\caption{Token-length distribution of the cleaned SVG corpus. Sequences exceeding the 512-token context window ($>$512) are filtered out; the remaining $\sim$432K SVGs concentrate in the 256--512 range.}
+\label{fig:seq_hist}
+\end{figure}
+
+Figure~\ref{fig:svg_examples} shows a small grid of rendered training examples.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{svg_examples_grid.png}
+\caption{Representative SVG training examples. Top row: monochrome stroked icons from \texttt{svg-icons-simple}. Bottom row: color glyphs and multi-path documents from \texttt{svg-emoji-simple} and \texttt{svg-stack-simple}.}
+\label{fig:svg_examples}
+\end{figure}
+
 \section{Methods}
 \section{Results}
 \section{Discussion}
@@ -49,13 +120,13 @@ The pipeline covers the full machine learning life cycle comprising of data coll
 
 \bibitem[1]{1} J. Kaplan, S. McCandlish, T. Henighan, T. B. Brown, B. Chess, R. Child, S. Gray, A. Radford, J. Wu, and D. Amodei, ``Scaling Laws for Neural Language Models,'' \textit{arXiv preprint arXiv:2001.08361}, 2020.
 
-\bibitem[2]{hoffmann2022chinchilla} J. Hoffmann, S. Borgeaud, A. Mensch, E. Buchatskaya, T. Cai, E. Rutherford, D. de Las Casas, L. A. Hendricks, J. Welbl, A. Clark, et al., ``Training Compute-Optimal Large Language Models,'' \textit{arXiv preprint arXiv:2203.15556}, 2022.
+\bibitem[2]{2} J. Hoffmann, S. Borgeaud, A. Mensch, E. Buchatskaya, T. Cai, E. Rutherford, D. de Las Casas, L. A. Hendricks, J. Welbl, A. Clark, et al., ``Training Compute-Optimal Large Language Models,'' \textit{arXiv preprint arXiv:2203.15556}, 2022.
 
-\bibitem[3]{yang2022mup} G. Yang, E. J. Hu, I. Babuschkin, S. Sidor, X. Liu, D. Farhi, N. Ryder, J. Pachocki, W. Chen, and J. Gao, ``Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer,'' \textit{arXiv preprint arXiv:2203.03466}, 2022.
+\bibitem[3]{3} G. Yang, E. J. Hu, I. Babuschkin, S. Sidor, X. Liu, D. Farhi, N. Ryder, J. Pachocki, W. Chen, and J. Gao, ``Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer,'' \textit{arXiv preprint arXiv:2203.03466}, 2022.
 
-\bibitem[4]{starvector2023} J. A. Rodriguez, S. Agarwal, I. H. Ben Mhenni, E. Belilovsky, E. Oyallon, and S. E. Kahou, ``StarVector: Generating Scalable Vector Graphics Code from Images,'' \textit{arXiv preprint arXiv:2312.11556}, 2023.
+\bibitem[4]{4} J. A. Rodriguez, S. Agarwal, I. H. Ben Mhenni, E. Belilovsky, E. Oyallon, and S. E. Kahou, ``StarVector: Generating Scalable Vector Graphics Code from Images,'' \textit{arXiv preprint arXiv:2312.11556}, 2023.
 
-\bibitem[5]{karpathy2022nanogpt} A. Karpathy, ``nanoGPT,'' \url{https://github.com/karpathy/nanoGPT}, 2022.
+\bibitem[5]{5} A. Karpathy, ``nanoGPT,'' \url{https://github.com/karpathy/nanoGPT}, 2022.
 
 \end{thebibliography}
 
