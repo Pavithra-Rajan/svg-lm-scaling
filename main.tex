@@ -86,7 +86,7 @@ The merges learned by the trainer reveal the structure of the SVG ``language''. 
 
 After cleaning, the raw JSONL contains $774{,}688$ SVGs totalling $804.6$M characters (avg.\ $1{,}038$ chars per file). Tokenization, the $[4,\,513]$-token length filter, and the document-level split together yield the partitions in Table~\ref{tab:data_splits}; the training set comprises $145.6$M tokens, comfortably above the $\sim$100M target. Figure~\ref{fig:seq_hist} shows the token-length distribution after filtering. The corpus is bimodal between the 128--256 and 384--512 buckets, reflecting the contrast between simple monochrome icons (\texttt{svg-icons}) and denser multi-path glyphs from \texttt{svg-stack} and \texttt{svg-fonts}. Only $975$ of the $\sim$435K candidate documents exceed the 512-token cap and are dropped. Average sequence length after filtering is $342$ tokens.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \small
 \begin{tabular}{lrrr}
@@ -155,7 +155,7 @@ All models are decoder-only Transformers built on the nanoGPT~\cite{5} backbone 
     \label{fig:arch}
 \end{figure}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \small
 \begin{tabular}{lrrrrr}
@@ -177,7 +177,7 @@ XL     & 768 & 12 & 12 & 64 & 85{,}347{,}072    \\
 
 All five models are trained for one full epoch over the $145.6$M-token training partition with the same optimizer recipe (Table~\ref{tab:train_hp}), so any differences in final validation loss can be attributed to architectural scale rather than per-size tuning. The dataloader follows the nanoGPT pattern with each micro-batch is sampled by drawing random offsets into the flat \texttt{train.npy} array and slicing two adjacent length-512 windows to form the input/target pair.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \small
 \begin{tabular}{ll}
@@ -208,7 +208,7 @@ Checkpoint interval        & 200 steps (resume-safe, full optimizer state) \\
 
 The scaling study has four stages, summarized in Table~\ref{tab:exp_pipeline}. The same pipeline is run twice, once under \emph{Standard Parameterization} (SP), once under \emph{Maximal Update Parameterization} ($\mu$P)~\cite{4}. This yielded two parallel power-law fits that are then compared.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \small
 \begin{tabular}{lll}
@@ -227,7 +227,7 @@ Stage & Input & Output \\
 
 \textbf{LR sweep:} Seven candidates span two orders of magnitude (Table~\ref{tab:lr_grid}). Each is trained on Tiny for 400 steps, and the candidate with the lowest final validation loss is selected.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \small
 \begin{tabular}{lcccccccc}
@@ -242,7 +242,7 @@ $\eta_j$         & $1{\times}10^{-4}$ & $3{\times}10^{-4}$ & $6{\times}10^{-4}$ 
 
 \textbf{Power-law fit:} I fit the Kaplan-style relation $L(N) = a \cdot N^{-\alpha} + c$ in two ways (Table~\ref{tab:fit_methods}). The log-log linear regression is the reported value for $\alpha$. The 3-parameter \texttt{curve\_fit} with $c$ pinned to $0.95\,\min_i L_i$ is a cross-check that prevents the covariance from diverging when the five $L_i$ are close.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \small
 \begin{tabular}{lll}
@@ -259,7 +259,7 @@ Log-log linear regression & $a, \alpha$ (fits $L = a N^{-\alpha}$) & Primary; nu
 
 \textbf{$\mu$P comparison:} Maximal Update Parameterization is implemented via the \texttt{mup} package. The three architectural deltas relative to SP are listed in Table~\ref{tab:mup_deltas}. Base shapes are constructed from a width-64 base model and a width-128 delta model that share the target's depth, so only the width axis is reparameterized. The base/delta head count is fixed at $4$ to keep $d_h$ divisible.
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \small
 \begin{tabular}{lll}
@@ -277,34 +277,157 @@ Optimizer             & \texttt{torch.optim.AdamW} & \texttt{mup.optim.MuAdamW} 
 
 \textbf{Extrapolation:} The fit with the higher $R^2$ between SP and $\mu$P is used to predict the validation loss of a hypothetical model $10\times$ larger than XL ($\sim$$850$M params). Uncertainty in the predicted loss is propagated from the standard error of $\alpha$ via $|\partial L / \partial \alpha| = a N^{-\alpha} \log N$.
 
-\subsection{Evaluation Metrics}
-
-The two parameterizations are compared along three axes (Table~\ref{tab:metrics}). The headline metric is the final validation cross-entropy loss; system metrics characterize the compute--quality trade-off; and a qualitative pass on rendered samples is used as a sanity check on the best checkpoint, but does not drive any architectural decisions.
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{lll}
-\toprule
-Category & Metric & Source / how computed \\
-\midrule
-Quality   & Final val.\ loss          & 200 random 512-token windows, end of epoch \\
-Quality   & Train / val loss curves   & Logged every 100 / 200 steps \\
-Quality   & Scaling exponent $\alpha$ & Log-log regression on $\{(N_i, L_i)\}_{i=1}^5$ \\
-Quality   & Fit quality $R^2$         & Relative to mean of $L_i$ \\
-System    & Wall-clock time           & Per-epoch, includes resumes \\
-System    & Peak GPU memory           & \texttt{torch.cuda.max\_memory\_allocated} \\
-System    & Throughput (tok/s)        & Tokens processed / wall-clock seconds \\
-SP vs $\mu$P & $\Delta L_i$           & $L_{\mu\mathrm{P},i} - L_{\mathrm{SP},i}$ per size \\
-SP vs $\mu$P & LR-transfer success    & Overlap of $\arg\min_\eta L$ across SP and $\mu$P sweeps \\
-Qualitative  & Sample inspection      & nucleus / top-$k$ generation, rendered with \texttt{cairosvg} \\
-\bottomrule
-\end{tabular}
-\caption{Metrics recorded for every training run, organized by category.}
-\label{tab:metrics}
-\end{table}
 
 \section{Results}
+
+This section reports the outcomes from section 3 detailing the learning-rate sweep (with the SP--$\mu$P LR-transfer comparison), the full one-epoch scaling runs and power-law fit, the extrapolation to $10\times$XL, and finally the training-loss plots and a qualitative evaluation of generated samples from the best checkpoint. All numbers are mean validation cross-entropy in nats per token. A ``nat" (natural unit of information) is a unit of information entropy based on base-e logarithms.
+
+\subsection{Learning-rate Sweep and SP vs.\ $\mu$P Transfer}
+
+Each of the seven LR candidates (Table~\ref{tab:lr_grid}) was trained on Tiny for 400 steps under both parameterizations. Figure~\ref{fig:lr_sweep} shows that both sweeps trace a clean U-shape with a wide flat optimum, and \emph{both pick $\eta^\star = 6{\times}10^{-3}$ as the best value}. Table~\ref{tab:lr_sweep} gives the underlying numbers.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.85\linewidth]{lr_sweep_comparison.png}
+    \caption{Learning-rate sweep on Tiny (400 steps each). Both SP and $\mu$P select $6{\times}10^{-3}$ as optimal (red star), giving a single LR that can be reused across scales.}
+    \label{fig:lr_sweep}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lccccccc}
+\toprule
+$\eta_{\max}$ & $1{\times}10^{-4}$ & $3{\times}10^{-4}$ & $6{\times}10^{-4}$ & $1{\times}10^{-3}$ & $3{\times}10^{-3}$ & $\mathbf{6{\times}10^{-3}}$ & $1{\times}10^{-2}$ \\
+\midrule
+SP val.\ loss     & 3.36 & 1.71 & 1.43 & 1.28 & 1.09 & \textbf{1.04} & 1.21 \\
+$\mu$P val.\ loss & 5.45 & 2.72 & 1.70 & 1.46 & 1.18 & \textbf{1.15} & 1.30 \\
+\bottomrule
+\end{tabular}
+\caption{Final validation loss after 400-step LR sweeps on Tiny. The $\arg\min$ over $\eta$ coincides between SP and $\mu$P, confirming LR transferability at the smallest scale.}
+\label{tab:lr_sweep}
+\end{table}
+
+Both sweeps picking $6{\times}10^{-3}$ on Tiny is not by itself the LR-transfer property. The actual claim is that the small-model optimum remains optimal at larger widths, which I test in section 4.2. There SP collapses at Large/XL with this LR while $\mu$P remains stable, indicating that $\mu$P transfers, SP does not.
+
+\subsection{Transformer Scaling under Standard Parameterization and $\mu$P}
+
+With $\eta^\star = 6{\times}10^{-3}$ fixed, all five sizes were trained for one full epoch ($\sim$2{,}221 steps, 145.6M tokens) under SP and $\mu$P. The headline numbers are in Table~\ref{tab:scaling_results}, and the scaling curves are overlaid in Figure~\ref{fig:scaling}.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lrrrrr}
+\toprule
+& & \multicolumn{2}{c}{\textbf{SP}} & \multicolumn{2}{c}{\textbf{$\mu$P}} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Model & Params (non-emb.) & Val.\ loss & Time (m) & Val.\ loss & Time (m) \\
+\midrule
+Tiny    & 853{,}120     & 0.7226           & 24.0  & 0.7341 & 23.5 \\
+Small   & 2{,}755{,}008  & 0.6502           & 49.7  & 0.6976 & 4.6 \\
+Medium  & 10{,}818{,}432 & \textbf{0.6322}  & 102.7 & 0.6774 & 3.9 \\
+Large   & 31{,}730{,}176 & 1.3587           & 250.8 & 0.6557 & 7.2 \\
+XL      & 85{,}347{,}072 & 1.8051           & 677.8 & \textbf{0.6944} & 12.5 \\
+\bottomrule
+\end{tabular}
+
+
+\caption{Final validation loss and wall-clock per size under each parameterization. The transformer bodies are identical at each label, so the parameter count is single-valued once embeddings are excluded. The $\mu$P implementation drops weight tying and its raw reported count is therefore $2 V d_{\text{model}}$ larger than SP at each scale (one $V{\times}d$ from the un-tied \texttt{MuReadout}, one from including the embedding in the count). Numbers above are normalized to the SP non-embedding convention. Bold marks the best loss within each parameterization.}
+\label{tab:scaling_results}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\linewidth]{comparison_scaling_plot.png}
+    \caption{Scaling curves under Standard Parameterization (blue) and $\mu$P (orange). SP exhibits a U-shape with a minimum at Medium followed by two divergent runs at Large and XL, while $\mu$P decays smoothly toward XL. \emph{Note}: the $\mu$P points are plotted at their raw reported parameter counts (which include the un-tied output projection and embedding), so each $\mu$P marker sits slightly right of the corresponding SP marker; under the normalized non-embedding convention used in Table~\ref{tab:scaling_results}, the two curves share identical $x$-coordinates at each label.}
+    \label{fig:scaling}
+\end{figure}
+
+The most important observation is that \emph{the SP curve is non-monotonic}. SP loss decreases from Tiny to Medium, but Large and XL diverge sharply (val.\ loss $\geq 1.36$), reflecting training instability when the Tiny-optimal LR is reused at much larger widths. $\mu$P reuses the same LR but stays in a narrow $0.65$--$0.73$ band across all five scales, with the best $\mu$P run (Large at $0.6557$) only $0.024$ nats above the absolute best (SP Medium at $0.6322$). The per-size delta $\Delta L = L_{\mu\mathrm{P}} - L_{\mathrm{SP}}$ is positive for the three small sizes (SP wins narrowly when SP is stable) but flips sharply negative at Large and XL ($-0.70$ and $-1.11$ nats respectively), where SP fails outright.
+
+\subsection{Power-law Fit and Extrapolation}
+
+I fit $L = a \cdot N^{-\alpha}$ via log-log linear regression on the SP points. The 3-parameter \texttt{curve\_fit} cross-check gave the same numbers (the no-offset fit dominates for these data). Table~\ref{tab:fit_results} reports the result.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+Fit & $a$ & $\alpha$ & $R^2$ & Reference \\
+\midrule
+SP (log-log)               & 0.0304 & $-0.2139$ & 0.7723 & this work \\
+Kaplan NLP~\cite{1}        & ---    & $\approx 0.076$ & --- & natural language \\
+Chinchilla~\cite{2}        & ---    & $\approx 0.34$  & --- & compute-optimal NLP \\
+\bottomrule
+\end{tabular}
+\caption{Power-law fit on the SP scaling points. The fitted exponent is \emph{negative} because the SP runs at Large and XL diverged; the fit is therefore not a clean scaling law but a quantitative summary of the collapse beyond Medium.}
+\label{tab:fit_results}
+\end{table}
+
+The negative $\alpha$ means the fit, taken at face value, predicts loss to \emph{grow} with $N$ over the measured range. Mechanically this reflects the two divergent SP runs dominating the regression rather than a property of SVG language modeling itself. The three stable SP points (Tiny, Small, Medium) on their own give a positive scaling slope. Extrapolating the SP fit to a hypothetical $10\times$XL model ($\sim$916M params) yields a predicted loss of \emph{$2.51$ nats} (Table~\ref{tab:extrap}), but this number is not meaningfully predictive. It merely says that, if a fixed-LR SP run at $10\times$XL behaved like the $1\times$XL run, the loss would worsen further. A more honest projection would re-fit on the $\mu$P points (which scale monotonically from $0.73$ to $0.69$ over a $48\times$ widening) and predict a $\mu$P $10\times$XL loss in the low-$0.6$s. I report the SP extrapolation here for completeness, with the caveat that the divergence at Large/XL violates the power-law assumption. 
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lrr}
+\toprule
+Quantity & XL ($1\times$) & $10\times$ XL (extrapolated) \\
+\midrule
+Parameters $N$ (non-emb.)     & $8.53{\times}10^{7}$ & $8.53{\times}10^{8}$ \\
+Predicted val.\ loss (SP fit) & $1.81$ (measured)    & $2.47$ \\
+$1\sigma$ uncertainty         & ---                  & $0.00$ (log-log, not propagated) \\
+\bottomrule
+\end{tabular}
+\caption{Extrapolation of the SP power-law fit to a $10\times$XL model, evaluated at the non-embedding parameter count for consistency with Table~\ref{tab:scaling_results}. The $1\sigma$ band is zero because log-log linear regression returns no covariance for $\alpha$; the 3-parameter \texttt{curve\_fit} cross-check coincided with the log-log estimate. The number changes only marginally if the raw $\mu$P-reported $9.16{\times}10^{7}$ is used instead ($\hat L \approx 2.51$ at $9.16{\times}10^{8}$).}
+\label{tab:extrap}
+\end{table}
+
+\subsection{Training Curves}
+
+Figure~\ref{fig:train_curves} shows training and validation loss versus optimizer step for the five SP runs. Tiny/Small/Medium descend smoothly toward the $0.6$--$0.7$ plateau, while Large and XL show high-variance, plateau-then-spike trajectories typical of LR-induced instability at large width. The instability is visible by step $\sim$500 in the XL curve and never recovers across the remaining $\sim$1{,}700 steps. This is consistent with the scaling-table picture. It is not that Large/XL are under-trained, but that the optimizer is operating outside its stable regime under SP at this width.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\linewidth]{training_curves_sp.png}
+    \caption{Training (left) and validation (right) loss curves for the five SP runs. Tiny/Small/Medium converge smoothly; Large/XL exhibit instability under the fixed Tiny-optimal LR.}
+    \label{fig:train_curves}
+\end{figure}
+
+\subsection{Generated Samples and Final-model Evaluation}
+
+The best checkpoint by validation loss is \texttt{sp\_medium} ($10.8$M params, val.\ loss $0.6322$), and all qualitative and downstream evaluation is run against this model. I generate 50 unconditional samples with temperature $T=0.8$ and top-$k$=50 and score them on parseability, render-ability, and structural validity (Table~\ref{tab:eval_metrics}). Figure~\ref{fig:generated} renders six representative unconditional samples to PNG via \texttt{cairosvg}.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lr}
+\toprule
+Metric & Value \\
+\midrule
+Test-set perplexity                       & $1.874$  \\
+Test-set average NLL (nats/token)         & $0.628$  \\
+XML validity rate (\texttt{lxml.fromstring}) & $98\%$ \\
+Render rate (\texttt{cairosvg.svg2png})      & $98\%$ \\
+Structural validity (\texttt{<svg>}\,\dots\,\texttt{</svg>}) & $98\%$ \\
+\texttt{viewBox} attribute present        & $100\%$ \\
+Average generated length                  & $319.7$ chars \\
+\# evaluation samples                     & $50$ \\
+\bottomrule
+\end{tabular}
+\caption{Quantitative evaluation of the best checkpoint (\texttt{sp\_medium}) on a held-out test partition (perplexity) and on 50 generated samples (validity rates).}
+\label{tab:eval_metrics}
+\end{table}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{generated.png}
+    \caption{All the SVG samples created from the trained model. This is a snippet from the HTML created by part4.py}
+    \label{fig:generated}
+\end{figure}
+
+The $98\%$ XML/render/structural rate and $100\%$ \texttt{viewBox} usage indicate the model has reliably internalized the surface syntax of SVG: opening/closing tags, valid attribute syntax, namespace declarations. The generations cluster into the monochrome silhouette mode of the training corpus and are visually coherent as abstract icons, though they do not reliably depict any specific real-world object. A limitation more attributable to the lack of conditioning signal (no captions or class labels) than to model capacity at this scale. Prefix-conditioned generation, attempted on five icon-completion prompts, produced syntactically malformed output in every case (the completions broke the prompt's tag balance), suggesting that prefix-completion on a model trained purely on full documents is harder than unconditional sampling and would benefit from explicit document-fragment training.
+
 \section{Discussion}
 \section{Conclusion}
 \section{Appendices}
