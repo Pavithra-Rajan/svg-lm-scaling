@@ -30,14 +30,16 @@ Machine Learning\\
 Scaling laws for neural language models have emerged as one of the most practically useful empirical findings in modern deep learning. Kaplan et al.\cite{1} demonstrated that model loss follows a predictable power-law as a function of model size, dataset size, and compute budget, enabling practitioners to extrapolate the performance of large, expensive models from small, cheap runs. Subsequent work by Hoffmann et al.\cite{2} refined these findings into compute-optimal training recipes. However, nearly all such studies target natural language and far less is known about whether these relationships hold for structured, programmatic representations of visual content.
 \vspace{5pt}
 
-Scalable Vector Graphics (SVG) occupies an interesting middle ground between code and visual art. An SVG file is a sequence of XML-tagged drawing commands like paths, shapes, gradients, and transforms, that a renderer interprets to produce an image. This structure makes SVGs to be treated as a programming language. Yet the semantics are fundamentally visual. Recent work such as StarVector~\cite{3} has demonstrated that language models can be trained to generate and understand SVG, opening the door to automated icon synthesis, vector graphic editing, and scalable design tools. However, it remains unclear how model capacity translates to generation quality in this domain. Does loss improve at the same rate as in natural language? Do the same power-law exponents hold? Can learning rates be transferred across scales without re-sweeping?
+Scalable Vector Graphics (SVG) occupies an interesting middle ground between code and visual art. An SVG file is a sequence of XML-tagged drawing commands like paths, shapes, gradients, and transforms, that a renderer interprets to produce an image. This structure makes SVGs to be treated as a programming language. Yet the semantics are fundamentally visual. Recent work such as StarVector~\cite{4} has demonstrated that language models can be trained to generate and understand SVG, opening the door to automated icon synthesis, vector graphic editing, and scalable design tools. However, it remains unclear how model capacity translates to generation quality in this domain. Does loss improve at the same rate as in natural language? Do the same power-law exponents hold? Can learning rates be transferred across scales without re-sweeping?
 \vspace{5pt}
 
 This project investigates scaling laws for decoder-only Transformer language models trained exclusively on SVG data. I make two primary contributions. First, I train five GPT-style models spanning roughly two orders of magnitude in parameter count, from 853,120 (Tiny) to 85,347,072 (XL), on a curated corpus of vector icon SVGs and fit power-law curves of the form $L = a \cdot N^{-\alpha} + c$ to characterize how validation loss scales with model size. Second, I evaluate Maximal Update Parameterization ($\mu$P)\cite{4} as a mechanism for learning-rate transfer. By reparameterizing the model in $\mu$P coordinates, the optimal learning rate at small scale should remain optimal at large scale, potentially eliminating the need for expensive per-scale hyperparameter sweeps.
 \vspace{1pt}
 
 The pipeline covers the full machine learning life cycle comprising of data collection and cleaning, BPE tokenizer training, binary dataset preparation, model definition, learning-rate sweeps, scaling runs, quantitative analysis, and a qualitative evaluation of generated SVG samples. Through this end-to-end study, the aim is to characterize whether the favorable scaling properties observed in natural language carry over to the SVG domain, and whether $\mu$P provides a reliable shortcut for hyperparameter transfer in this setting.
+\\
 
+\textbf{Note: }All training was performed using a combination of T4 and A100 compute resources through the Colab Pro subscription for additional compute hours.
 \section{Data}
 
 \subsection{Dataset Description and Preprocessing Pipeline}
@@ -336,18 +338,18 @@ XL      & 85{,}347{,}072 & 1.8051           & 677.8 & \textbf{0.6944} & 12.5 \\
 \label{tab:scaling_results}
 \end{table}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.75\linewidth]{comparison_scaling_plot.png}
-    \caption{Scaling curves under Standard Parameterization (blue) and $\mu$P (orange). SP exhibits a U-shape with a minimum at Medium followed by two divergent runs at Large and XL, while $\mu$P decays smoothly toward XL. \emph{Note}: the $\mu$P points are plotted at their raw reported parameter counts (which include the un-tied output projection and embedding), so each $\mu$P marker sits slightly right of the corresponding SP marker; under the normalized non-embedding convention used in Table~\ref{tab:scaling_results}, the two curves share identical $x$-coordinates at each label.}
-    \label{fig:scaling}
-\end{figure}
-
 The most important observation is that \emph{the SP curve is non-monotonic}. SP loss decreases from Tiny to Medium, but Large and XL diverge sharply (val.\ loss $\geq 1.36$), reflecting training instability when the Tiny-optimal LR is reused at much larger widths. $\mu$P reuses the same LR but stays in a narrow $0.65$--$0.73$ band across all five scales, with the best $\mu$P run (Large at $0.6557$) only $0.024$ nats above the absolute best (SP Medium at $0.6322$). The per-size delta $\Delta L = L_{\mu\mathrm{P}} - L_{\mathrm{SP}}$ is positive for the three small sizes (SP wins narrowly when SP is stable) but flips sharply negative at Large and XL ($-0.70$ and $-1.11$ nats respectively), where SP fails outright.
 
 \subsection{Power-law Fit and Extrapolation}
 
 I fit $L = a \cdot N^{-\alpha}$ via log-log linear regression on the SP points. The 3-parameter \texttt{curve\_fit} cross-check gave the same numbers (the no-offset fit dominates for these data). Table~\ref{tab:fit_results} reports the result.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\linewidth]{comparison_scaling_plot.png}
+    \caption{Scaling curves under Standard Parameterization (blue) and $\mu$P (orange). SP exhibits a U-shape with a minimum at Medium followed by two divergent runs at Large and XL, while $\mu$P decays smoothly toward XL. \emph{Note}: the $\mu$P points are plotted at their raw reported parameter counts (which include the un-tied output projection and embedding), so each $\mu$P marker sits slightly right of the corresponding SP marker; under the normalized non-embedding convention used in Table~\ref{tab:scaling_results}, the two curves share identical $x$-coordinates at each label.}
+    \label{fig:scaling}
+\end{figure}
 
 \begin{table}[H]
 \centering
@@ -365,8 +367,6 @@ Chinchilla~\cite{2}        & ---    & $\approx 0.34$  & --- & compute-optimal NL
 \label{tab:fit_results}
 \end{table}
 
-The negative $\alpha$ means the fit, taken at face value, predicts loss to \emph{grow} with $N$ over the measured range. Mechanically this reflects the two divergent SP runs dominating the regression rather than a property of SVG language modeling itself. The three stable SP points (Tiny, Small, Medium) on their own give a positive scaling slope. Extrapolating the SP fit to a hypothetical $10\times$XL model ($\sim$916M params) yields a predicted loss of \emph{$2.51$ nats} (Table~\ref{tab:extrap}), but this number is not meaningfully predictive. It merely says that, if a fixed-LR SP run at $10\times$XL behaved like the $1\times$XL run, the loss would worsen further. A more honest projection would re-fit on the $\mu$P points (which scale monotonically from $0.73$ to $0.69$ over a $48\times$ widening) and predict a $\mu$P $10\times$XL loss in the low-$0.6$s. I report the SP extrapolation here for completeness, with the caveat that the divergence at Large/XL violates the power-law assumption. 
-
 \begin{table}[H]
 \centering
 \small
@@ -382,6 +382,8 @@ $1\sigma$ uncertainty         & ---                  & $0.00$ (log-log, not prop
 \caption{Extrapolation of the SP power-law fit to a $10\times$XL model, evaluated at the non-embedding parameter count for consistency with Table~\ref{tab:scaling_results}. The $1\sigma$ band is zero because log-log linear regression returns no covariance for $\alpha$; the 3-parameter \texttt{curve\_fit} cross-check coincided with the log-log estimate. The number changes only marginally if the raw $\mu$P-reported $9.16{\times}10^{7}$ is used instead ($\hat L \approx 2.51$ at $9.16{\times}10^{8}$).}
 \label{tab:extrap}
 \end{table}
+
+The negative $\alpha$ means the fit, taken at face value, predicts loss to \emph{grow} with $N$ over the measured range. Mechanically this reflects the two divergent SP runs dominating the regression rather than a property of SVG language modeling itself. The three stable SP points (Tiny, Small, Medium) on their own give a positive scaling slope. Extrapolating the SP fit to a hypothetical $10\times$XL model ($\sim$916M params) yields a predicted loss of \emph{$2.51$ nats} (Table~\ref{tab:extrap}), but this number is not meaningfully predictive. It merely says that, if a fixed-LR SP run at $10\times$XL behaved like the $1\times$XL run, the loss would worsen further. A more honest projection would re-fit on the $\mu$P points (which scale monotonically from $0.73$ to $0.69$ over a $48\times$ widening) and predict a $\mu$P $10\times$XL loss in the low-$0.6$s. I report the SP extrapolation here for completeness, with the caveat that the divergence at Large/XL violates the power-law assumption. 
 
 \subsection{Training Curves}
 
@@ -453,20 +455,22 @@ Three classes of limitations are worth naming.
 
 
 \section{Conclusion}
-\section{Appendices}
-\begin{figure}{h}
-    \centering
-    \includegraphics[width=1\linewidth]{generated.png}
-    \caption{All the SVG samples created from the trained model. This is a snippet from the HTML created by part4.py}
-    \label{fig:generated}
-\end{figure}
+This work investigates scaling behavior for decoder-only Transformers trained exclusively on Scalable Vector Graphics, fitting five GPT-style architectures from $853$K to $85.3$M parameters on a $145.6$M-token corpus. Under Standard Parameterization with a fixed learning rate of $6{\times}10^{-3}$, validation loss decreases from Tiny to Medium and then diverges at Large and XL, a non-monotonic curve attributable to large-width training instability rather than to scaling itself. 
+\\
+
+Under Maximal Update Parameterization, the same learning rate produces stable scaling across all five sizes, confirming $\mu$P's learning-rate-transfer property for this domain. The best checkpoint by validation loss is \texttt{sp\_medium} ($10.8$M parameters, $0.6322$ nats/token, test perplexity $1.87$). Unconditional samples from this checkpoint are $98\%$ XML-valid, $98\%$ renderable, and consistently include a \texttt{viewBox}, indicating that the model has internalized SVG surface syntax. Prefix-conditioned generation fails for most, attributable to a training-objective mismatch rather than to capacity limits. 
+\\
+
+The single-epoch set-up leaves XL well below the Chinchilla compute-optimal token-to-parameter ratio, so reported losses are upper bounds. This indicates that multi-epoch training, fill-in-the-middle objectives, and image-conditioned signals are natural next steps. The principal contribution is to demonstrate that $\mu$P is the practical mechanism that makes multi-scale SVG language modeling tractable on modest compute, and that further gains will come from richer training objectives rather than from increased model width alone.
+
 \begin{thebibliography}{00}
 
 \bibitem[1]{1} J. Kaplan, S. McCandlish, T. Henighan, T. B. Brown, B. Chess, R. Child, S. Gray, A. Radford, J. Wu, and D. Amodei, ``Scaling Laws for Neural Language Models,'' \textit{arXiv preprint arXiv:2001.08361}, 2020.
 
-\bibitem[2]{2} J. Hoffmann, S. Borgeaud, A. Mensch, E. Buchatskaya, T. Cai, E. Rutherford, D. de Las Casas, L. A. Hendricks, J. Welbl, A. Clark, et al., ``Training Compute-Optimal Large Language Models,'' \textit{arXiv preprint arXiv:2203.15556}, 2022.
+\bibitem[2]{2} Hoffmann, J., Borgeaud, S., Mensch, A., Buchatskaya, E., Cai, T., Rutherford, E., and et. al ``Training Compute-Optimal Large Language Models,'' \textit{arXiv preprint arXiv:2203.15556}, 2022.
 
-\bibitem[3]{3} G. Yang, E. J. Hu, I. Babuschkin, S. Sidor, X. Liu, D. Farhi, N. Ryder, J. Pachocki, W. Chen, and J. Gao, ``Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer,'' \textit{arXiv preprint arXiv:2203.03466}, 2022.
+
+\bibitem[3]{3} G. Yang, E. J. Hu, I. Babuschkin, S. Sidor, X. Liu, D. Farhi, J. Gao and et. al, ``Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer,'' \textit{arXiv preprint arXiv:2203.03466}, 2022.
 
 \bibitem[4]{4} J. A. Rodriguez, S. Agarwal, I. H. Ben Mhenni, E. Belilovsky, E. Oyallon, and S. E. Kahou, ``StarVector: Generating Scalable Vector Graphics Code from Images,'' \textit{arXiv preprint arXiv:2312.11556}, 2023.
 
@@ -474,4 +478,26 @@ Three classes of limitations are worth naming.
 
 \end{thebibliography}
 
+
+\section*{Code Repository and Reproducibility}
+
+All code for data preprocessing, model implementation, training, evaluation, and figure generation is available at \url{https://github.com/Pavithra-Rajan/svg-lm-scaling}. 
+
+Checkpoints, generated images, JSON artifacts, and intermediate result files are mirrored at:
+
+\url{https://drive.google.com/drive/folders/1w8AvQOGDSBcUVHCp4q72n6JsDGwbbZok?usp=sharing}.
+
+\section{Appendices}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{uncon.png}
+    \caption{Unconditional SVGs generated with the trained best model}
+    \label{fig:generated}
+\end{figure}
+
+\begin{figure}[H]
+    \includegraphics[width=0.65\linewidth]{generated2.png}
+    \caption{SVGs generated with different temperature values, top-k sampling and prefix-conditioned SVG generations}
+    \label{fig:generated2}
+\end{figure}
 \end{document}
