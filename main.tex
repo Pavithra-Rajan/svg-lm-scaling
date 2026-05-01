@@ -419,19 +419,47 @@ Average generated length                  & $319.7$ chars \\
 \label{tab:eval_metrics}
 \end{table}
 
-\begin{figure}
+The $98\%$ XML/render/structural rate and $100\%$ \texttt{viewBox} usage indicate the model has reliably internalized the surface syntax of SVG: opening/closing tags, valid attribute syntax, namespace declarations. The generations cluster into the monochrome silhouette mode of the training corpus and are visually coherent as abstract icons, though they do not reliably depict any specific real-world object. A limitation more attributable to the lack of conditioning signal (no captions or class labels) than to model capacity at this scale. Prefix-conditioned generation, attempted on five icon-completion prompts, produced syntactically malformed output in every case (the completions broke the prompt's tag balance), suggesting that prefix-completion on a model trained purely on full documents is harder than unconditional sampling and would benefit from explicit document-fragment training.
+
+\section{Discussion}
+
+
+\subsection{Key Insights from the Scaling Experiments}
+
+The headline takeaway is that ``bigger is better'' does not hold automatically for this corpus. Under Standard Parameterization with a single Tiny-tuned learning rate, the best validation loss came from \texttt{sp\_medium} at $10.8$M parameters, both larger sizes (Large, XL) ended up worse than every smaller size. So the SP curve is not a clean power law but a U-shape with a sweet spot in the middle. This was an unexpected result. However, it reframes the scaling question from ``how big should the model be?'' to ``can we train large widths stably at all?''. Once we control for stability via $\mu$P, validation loss does fall as $N$ grows, but only mildly. The $\mu$P column compresses into a $0.65$--$0.73$ band over a $48\times$ widening, which is closer to ``returns are starting to flatten'' than to the Kaplan-style $\alpha \approx 0.076$ slope seen in natural language.
+
+\subsection{Interpreting the LR Sweep and the $\mu$P Result}
+
+The two LR sweeps both selected $6{\times}10^{-3}$ on Tiny, but that coincidence is not the LR-transfer property. The actual claim that the small-model optimum stays optimal at large width is what fails for SP and holds for $\mu$P in our data. SP at $6{\times}10^{-3}$ runs cleanly through Medium and then breaks at Large and XL, with training curves showing the plateau-and-spike signature of an LR that is just outside the stable regime. $\mu$P at the same nominal $6{\times}10^{-3}$ stays intact across all five sizes. The headline is therefore not that $\mu$P beats SP on absolute loss. It indicates that $\mu$P removes the per-size LR sweep that SP would otherwise need to make Large and XL trainable. 
+
+\subsection{Design Decisions and Their Impact}
+
+Three early choices shaped what the rest of the project could and could not measure. 
+\begin{itemize}
+    \item The aggressive preprocessing like rounding numerics to one decimal place, stripping metadata, capping length pushed the corpus into the 256--512 token band where a 512-context model can see whole documents, which is what made document-level loss meaningful. 
+    \item The 4{,}096-token byte-level BPE vocabulary kept the embedding matrix small enough that even XL is dominated by transformer parameters rather than the embedding, which is what makes the scaling axis interpretable. 
+    \item The decision to use SP weight tying but drop it in $\mu$P (purely for implementation simplicity) created a $2 V d_{\text{model}}$ accounting gap in raw parameter counts that had to be normalized before comparing the two curves.
+
+\end{itemize}
+
+\subsection{Limitations and Future Work}
+
+Three classes of limitations are worth naming. 
+\begin{itemize}
+    \item \textbf{Compute and data}: the single-epoch budget puts XL at $\sim$1.7 training tokens per parameter, far below the $\sim$20 tokens/param Chinchilla recommends, so the $\mu$P plateau may be a data-bottleneck rather than a model-capacity result. A natural next step is multi-epoch training on a $4$--$10\times$ larger token budget, which would also refit the power law with a credible irreducible-loss term $c$.
+    \item \textbf{Method coverage}: $\mu$P base shapes here vary only along the width axis, so depth scaling and head-count scaling were never tested as transferable hyperparameters. A fuller study would sweep depth too. 
+    \item \textbf{Generation}: prefix-conditioned completion failed in three of the five attempted prompts because the model was trained purely on full documents wrapped in \texttt{<bos>}\,$\dots$\,\texttt{<eos>}, with no fill-in-the-middle objective, and there is no conditioning signal (captions, classes) that would let the model be \emph{asked} to draw a particular concept. Adding (i) training on randomly-sliced documents, (ii) a small image-conditioned StarVector-style head, and (iii) a held-out human-rated quality benchmark would convert this from a scaling-study artifact into a usable SVG generator. The current work establishes the scaling skeleton.
+\end{itemize}
+
+
+\section{Conclusion}
+\section{Appendices}
+\begin{figure}{h}
     \centering
     \includegraphics[width=1\linewidth]{generated.png}
     \caption{All the SVG samples created from the trained model. This is a snippet from the HTML created by part4.py}
     \label{fig:generated}
 \end{figure}
-
-The $98\%$ XML/render/structural rate and $100\%$ \texttt{viewBox} usage indicate the model has reliably internalized the surface syntax of SVG: opening/closing tags, valid attribute syntax, namespace declarations. The generations cluster into the monochrome silhouette mode of the training corpus and are visually coherent as abstract icons, though they do not reliably depict any specific real-world object. A limitation more attributable to the lack of conditioning signal (no captions or class labels) than to model capacity at this scale. Prefix-conditioned generation, attempted on five icon-completion prompts, produced syntactically malformed output in every case (the completions broke the prompt's tag balance), suggesting that prefix-completion on a model trained purely on full documents is harder than unconditional sampling and would benefit from explicit document-fragment training.
-
-\section{Discussion}
-\section{Conclusion}
-\section{Appendices}
-
 \begin{thebibliography}{00}
 
 \bibitem[1]{1} J. Kaplan, S. McCandlish, T. Henighan, T. B. Brown, B. Chess, R. Child, S. Gray, A. Radford, J. Wu, and D. Amodei, ``Scaling Laws for Neural Language Models,'' \textit{arXiv preprint arXiv:2001.08361}, 2020.
