@@ -8,7 +8,7 @@ The full write-up with the approach, analysis, tables, and figures lives in [`Re
 > - Best validation loss: **`sp_medium` at $0.6322$ nats/token** (10.8M params, 1 epoch over 145.6M tokens).
 > - SP scaling at a fixed Tiny-tuned LR is **non-monotonic** as Large and XL diverge.
 > - mup with the same LR ($6{\times}10^{-3}$) is **stable at all five scales**, validating LR-transfer.
-> - Generated samples are $98\%$ XML-valid, $98\%$ renderable, $100\%$ use a `viewBox`.
+> - Generated samples are 98% XML-valid, 98% renderable, 100% use a `viewBox`.
 
 
 ## Model Architecture
