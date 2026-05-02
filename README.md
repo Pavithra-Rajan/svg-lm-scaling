@@ -1,6 +1,6 @@
 # svg-lm-scaling
 
-**Scaling Laws for SVG Language Models**: A study of how decoder-only Transformer language models scale when trained exclusively on Scalable Vector Graphics. Covers data cleaning, BPE tokenization, five GPT-style architectures from $853$K to $85.3$M parameters, learning-rate sweeps, scaling-law fitting under both Standard Parameterization (SP) and Maximal Update Parameterization (mup), and a qualitative evaluation of generated SVG samples.
+**Scaling Laws for SVG Language Models**: A study of how decoder-only Transformer language models scale when trained exclusively on Scalable Vector Graphics. Covers data cleaning, BPE tokenization, five GPT-style architectures from 853K to 85.3M parameters, learning-rate sweeps, scaling-law fitting under both Standard Parameterization (SP) and Maximal Update Parameterization (mup), and a qualitative evaluation of generated SVG samples.
 
 The full write-up with the approach, analysis, tables, and figures lives in [`Report.pdf`](./Report.pdf). This README is a summary.
 
